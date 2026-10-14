@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/chronicle-ai-completion
   workflow_dispatch:
 
 permissions:
