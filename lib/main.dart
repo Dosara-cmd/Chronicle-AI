@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'services/video_exporter.dart';
+import 'services/narration_service.dart';
 
 void main() {
   runApp(const ChronicleAI());
@@ -606,7 +609,8 @@ class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
             maxLength: 300,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
-              hintText: 'Write a short caption for TikTok or other platforms...',
+              hintText:
+                  'Write a short caption for TikTok or other platforms...',
               alignLabelWithHint: true,
             ),
           ),
@@ -628,7 +632,13 @@ class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
           const SizedBox(height: 12),
           const FieldLabel('VIDEO DURATION'),
           ChoiceChips(
-            options: const ['1 minute', '2 minutes', '3 minutes', '4 minutes', '5 minutes'],
+            options: const [
+              '1 minute',
+              '2 minutes',
+              '3 minutes',
+              '4 minutes',
+              '5 minutes',
+            ],
             selected: duration,
             onSelected: (value) => setState(() => duration = value),
           ),
@@ -767,7 +777,8 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
             maxLength: 300,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
-              hintText: 'Write a short caption for TikTok or other platforms...',
+              hintText:
+                  'Write a short caption for TikTok or other platforms...',
               alignLabelWithHint: true,
             ),
           ),
@@ -789,7 +800,13 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
           const SizedBox(height: 12),
           const FieldLabel('VIDEO DURATION'),
           ChoiceChips(
-            options: const ['1 minute', '2 minutes', '3 minutes', '4 minutes', '5 minutes'],
+            options: const [
+              '1 minute',
+              '2 minutes',
+              '3 minutes',
+              '4 minutes',
+              '5 minutes',
+            ],
             selected: duration,
             onSelected: (value) => setState(() => duration = value),
           ),
@@ -858,16 +875,12 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
   }
 }
 
-
 List<String> buildSceneTitles(String input, int sceneCount) {
   final cleanInput = input.trim();
   final count = sceneCount.clamp(1, 20);
 
   if (cleanInput.isEmpty) {
-    return List.generate(
-      count,
-      (index) => 'Historical chapter ${index + 1}',
-    );
+    return List.generate(count, (index) => 'Historical chapter ${index + 1}');
   }
 
   // Split pasted scripts into sentences or paragraphs when possible.
@@ -918,10 +931,7 @@ List<String> buildSceneTitles(String input, int sceneCount) {
 
 String buildVideoDescription(String input) {
   final clean = input.trim().replaceAll(RegExp(r'\s+'), ' ');
-  final firstSentence = clean
-      .split(RegExp(r'(?<=[.!?])\s+'))
-      .first
-      .trim();
+  final firstSentence = clean.split(RegExp(r'(?<=[.!?])\s+')).first.trim();
   final subject = firstSentence.isEmpty
       ? 'this fascinating story from history'
       : firstSentence;
@@ -949,92 +959,326 @@ Future<void> renderAndShareVideo(
   required List<String> sceneTitles,
   required String duration,
   required String description,
+  required String voice,
 }) async {
-  var progressDialogOpen = false;
+  var dialogOpen = false;
+  final narrationPaths = <String>[];
 
   try {
+    final match = RegExp(r'\d+').firstMatch(duration);
+    final minutes = int.tryParse(match?.group(0) ?? '') ?? 3;
+    if (sceneTitles.isEmpty || minutes < 1 || minutes > 5) {
+      throw ArgumentError('Choose scenes and a duration from 1 to 5 minutes.');
+    }
+
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => const AlertDialog(
+      builder: (_) => const AlertDialog(
         backgroundColor: surface2,
         content: Row(
           children: [
             SizedBox(
-              width: 26,
-              height: 26,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: gold,
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(color: gold),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('Creating narration and rendering video...')),
+          ],
+        ),
+      ),
+    );
+    dialogOpen = true;
+
+    final seconds = minutes * 60;
+    final perScene = (seconds + sceneTitles.length - 1) ~/ sceneTitles.length;
+    narrationPaths.addAll(
+      await ChronicleNarrationService.synthesizeSceneNarration(
+        sceneTexts: sceneTitles,
+        voice: voice,
+      ),
+    );
+
+    final file = await ChronicleVideoExporter.exportTitleCardVideo(
+      title: title,
+      sceneTitles: sceneTitles,
+      secondsPerScene: perScene,
+      totalDurationSeconds: seconds,
+      narrationAudioPaths: narrationPaths,
+    );
+
+    if (context.mounted && dialogOpen) {
+      Navigator.of(context, rootNavigator: true).pop();
+      dialogOpen = false;
+    }
+    if (!context.mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChronicleVideoPreviewScreen(
+          file: file,
+          title: title,
+          description: description,
+        ),
+      ),
+    );
+  } catch (error) {
+    if (context.mounted && dialogOpen) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (context.mounted) showMessage(context, 'Export failed: $error');
+  } finally {
+    await ChronicleNarrationService.deleteFiles(narrationPaths);
+  }
+}
+
+class ChronicleEditorPreview extends StatelessWidget {
+  const ChronicleEditorPreview({super.key, required this.onGenerate});
+
+  final VoidCallback onGenerate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: const Color(0xFF202124),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: gold.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.movie_creation_outlined, color: gold, size: 54),
+          const SizedBox(height: 14),
+          const Text(
+            'VIDEO PREVIEW',
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 2),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '9:16 vertical video',
+            style: TextStyle(color: muted, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Generate your video to open the playable MP4 preview.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onGenerate,
+              icon: const Icon(Icons.play_circle_outline),
+              label: const Text('Generate and preview video'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: gold,
+                side: const BorderSide(color: gold),
+                minimumSize: const Size.fromHeight(48),
               ),
             ),
-            SizedBox(width: 18),
-            Expanded(
-              child: Text(
-                'Rendering your vertical video. '
-                'This may take a while on your phone.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ChronicleVideoPreviewScreen extends StatefulWidget {
+  const ChronicleVideoPreviewScreen({
+    super.key,
+    required this.file,
+    required this.title,
+    required this.description,
+  });
+
+  final File file;
+  final String title;
+  final String description;
+
+  @override
+  State<ChronicleVideoPreviewScreen> createState() =>
+      _ChronicleVideoPreviewScreenState();
+}
+
+class _ChronicleVideoPreviewScreenState
+    extends State<ChronicleVideoPreviewScreen> {
+  late final VideoPlayerController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(widget.file);
+    _controller.addListener(_videoChanged);
+    _initializeVideo();
+  }
+
+  void _videoChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      await _controller.initialize();
+      await _controller.setLooping(true);
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'Unable to play this MP4: $error');
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_videoChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _shareVideo() async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(widget.file.path)],
+        text: widget.description.trim().isEmpty
+            ? 'Created with Chronicle AI'
+            : '${widget.description.trim()}\n\nCreated with Chronicle AI',
+        subject: widget.title,
+      ),
+    );
+  }
+
+  String _time(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = _controller.value.isInitialized;
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
+        title: const Text('Video preview'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              widget.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: gold.withValues(alpha: 0.35)),
+              ),
+              child: _error != null
+                  ? Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    )
+                  : !ready
+                  ? const SizedBox(
+                      height: 280,
+                      child: Center(
+                        child: CircularProgressIndicator(color: gold),
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: AspectRatio(
+                            aspectRatio: _controller.value.aspectRatio,
+                            child: VideoPlayer(_controller),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            IconButton(
+                              tooltip: _controller.value.isPlaying
+                                  ? 'Pause video'
+                                  : 'Play video',
+                              color: gold,
+                              onPressed: () async {
+                                if (_controller.value.isPlaying) {
+                                  await _controller.pause();
+                                } else {
+                                  await _controller.play();
+                                }
+                              },
+                              icon: Icon(
+                                _controller.value.isPlaying
+                                    ? Icons.pause_circle_filled
+                                    : Icons.play_circle_fill,
+                                size: 38,
+                              ),
+                            ),
+                            Expanded(
+                              child: VideoProgressIndicator(
+                                _controller,
+                                allowScrubbing: true,
+                                colors: const VideoProgressColors(
+                                  playedColor: gold,
+                                  bufferedColor: muted,
+                                  backgroundColor: surface2,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${_time(_controller.value.position)} / '
+                              '${_time(_controller.value.duration)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _shareVideo,
+              icon: const Icon(Icons.share),
+              label: const Text('Share MP4 video'),
+              style: FilledButton.styleFrom(
+                backgroundColor: gold,
+                foregroundColor: bg,
+                minimumSize: const Size.fromHeight(52),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Saved video: ${widget.file.path}',
+              style: const TextStyle(color: muted, fontSize: 11),
             ),
           ],
         ),
       ),
     );
-    progressDialogOpen = true;
-
-    if (sceneTitles.isEmpty) {
-      throw ArgumentError('At least one scene is required.');
-    }
-
-    final durationMatch = RegExp(r'\d+').firstMatch(duration);
-    final minutes = int.tryParse(durationMatch?.group(0) ?? '') ?? 3;
-
-    if (minutes < 1 || minutes > 5) {
-      throw ArgumentError('Video duration must be between 1 and 5 minutes.');
-    }
-
-    final totalDurationSeconds = minutes * 60;
-    final secondsPerScene =
-        (totalDurationSeconds + sceneTitles.length - 1) ~/ sceneTitles.length;
-
-    final file = await ChronicleVideoExporter.exportTitleCardVideo(
-      title: title,
-      sceneTitles: sceneTitles,
-      secondsPerScene: secondsPerScene,
-      totalDurationSeconds: totalDurationSeconds,
-    );
-
-    if (context.mounted && progressDialogOpen) {
-      Navigator.of(context, rootNavigator: true).pop();
-      progressDialogOpen = false;
-    }
-
-    if (!context.mounted) return;
-
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        text: description.trim().isEmpty
-            ? 'Created with Chronicle AI'
-            : '${description.trim()}\n\nCreated with Chronicle AI',
-        subject: title,
-      ),
-    );
-
-    if (context.mounted) {
-      showMessage(context, 'Video exported: ${file.path}');
-    }
-  } catch (error) {
-    if (context.mounted && progressDialogOpen) {
-      Navigator.of(context, rootNavigator: true).pop();
-      progressDialogOpen = false;
-    }
-
-    if (context.mounted) {
-      showMessage(
-        context,
-        'Video export failed. Please try again. Details: $error',
-      );
-    }
   }
 }
 
@@ -1102,9 +1346,9 @@ class PreparationScreen extends StatelessWidget {
                   projectInput: topic,
                   selectedStyle: style,
                   selectedVoice: voice,
-                duration: duration,
+                  duration: duration,
                   description: description,
-      ),
+                ),
               ),
             ),
           ),
@@ -1113,8 +1357,9 @@ class PreparationScreen extends StatelessWidget {
             onPressed: () => renderAndShareVideo(
               context,
               title: topic.trim().isEmpty ? 'Chronicle History' : topic.trim(),
+              voice: voice,
               sceneTitles: buildSceneTitles(topic, 4),
-      duration: duration,
+              duration: duration,
               description: description,
             ),
             icon: const Icon(Icons.auto_awesome),
@@ -1317,7 +1562,7 @@ class EditorScreen extends StatefulWidget {
     this.projectInput = '',
     this.selectedStyle = 'Cinematic Realism',
     this.selectedVoice = 'Deep Documentary',
-  this.duration = '3 minutes',
+    this.duration = '3 minutes',
     this.description = '',
   });
 
@@ -1326,9 +1571,9 @@ class EditorScreen extends StatefulWidget {
   final String selectedStyle;
   final String selectedVoice;
 
-    final String duration;
+  final String duration;
   final String description;
-@override
+  @override
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
@@ -1356,13 +1601,13 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-    @override
+  @override
   void dispose() {
     descriptionController.dispose();
     super.dispose();
   }
 
-@override
+  @override
   Widget build(BuildContext context) {
     return PageFrame(
       title: 'Editing studio',
@@ -1370,43 +1615,19 @@ class _EditorScreenState extends State<EditorScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: double.infinity,
-            height: 390,
-            decoration: BoxDecoration(
-              color: const Color(0xFF202124),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: gold.withValues(alpha: 0.3)),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.account_balance_rounded,
-                  color: gold,
-                  size: 64,
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'VIDEO PREVIEW',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  '9:16 vertical canvas',
-                  style: TextStyle(color: muted, fontSize: 12),
-                ),
-                const SizedBox(height: 20),
-                const Icon(Icons.play_circle_outline, color: gold, size: 44),
-                const SizedBox(height: 8),
-                const Text(
-                  'No rendered video yet',
-                  style: TextStyle(color: muted, fontSize: 12),
-                ),
-              ],
+          ChronicleEditorPreview(
+            onGenerate: () => renderAndShareVideo(
+              context,
+              title: widget.projectTitle,
+              sceneTitles: buildSceneTitles(
+                widget.projectInput.isNotEmpty
+                    ? widget.projectInput
+                    : widget.projectTitle,
+                sceneCount,
+              ),
+              duration: widget.duration,
+              description: descriptionController.text,
+              voice: voice,
             ),
           ),
           const SizedBox(height: 20),
@@ -1513,6 +1734,7 @@ class _EditorScreenState extends State<EditorScreen> {
             onPressed: () => renderAndShareVideo(
               context,
               title: widget.projectTitle,
+              voice: voice,
               sceneTitles: buildSceneTitles(
                 widget.projectInput.isNotEmpty
                     ? widget.projectInput
@@ -1568,7 +1790,7 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ],
         );
-            case 'Description':
+      case 'Description':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1595,7 +1817,6 @@ class _EditorScreenState extends State<EditorScreen> {
           ],
         );
       case 'Scenes':
-
         return Text(
           'Scene ${selectedScene + 1} selected. '
           'You can add scenes and select them in the timeline. '

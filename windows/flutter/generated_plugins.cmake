@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   ffmpeg_kit_flutter_new_min
+  flutter_tts
   share_plus
   url_launcher_windows
 )

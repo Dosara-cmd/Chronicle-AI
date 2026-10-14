@@ -18,9 +18,13 @@ class ChronicleVideoExporter {
     required List<String> sceneTitles,
     int secondsPerScene = 30,
     int? totalDurationSeconds,
+    required List<String> narrationAudioPaths,
   }) async {
     if (sceneTitles.isEmpty) {
       throw ArgumentError('At least one scene is required.');
+    }
+    if (narrationAudioPaths.length != sceneTitles.length) {
+      throw ArgumentError('Each scene needs narration audio.');
     }
 
     if (secondsPerScene < 1 || secondsPerScene > 300) {
@@ -58,6 +62,7 @@ class ChronicleVideoExporter {
           file: imageFile,
           projectTitle: title,
           sceneTitle: sceneTitles[index],
+          subtitleText: sceneTitles[index],
           sceneNumber: index + 1,
           totalScenes: sceneTitles.length,
         );
@@ -90,23 +95,40 @@ class ChronicleVideoExporter {
         durationSeconds: totalSeconds,
       );
 
+      final narrationInputs =
+          narrationAudioPaths.map((p) => "-i '$p' ").join();
+      final filters = <String>[];
+
+      for (var i = 0; i < narrationAudioPaths.length; i++) {
+        filters.add(
+          '[${i + 1}:a]apad=pad_dur=$secondsPerScene,'
+          'atrim=duration=$secondsPerScene,'
+          'asetpts=PTS-STARTPTS[n$i]',
+        );
+      }
+
+      final labels = List.generate(
+        narrationAudioPaths.length, (i) => '[n$i]',
+      ).join();
+      final ambientIndex = narrationAudioPaths.length + 1;
+      filters.add('$labels'
+          'concat=n=${narrationAudioPaths.length}:v=0:a=1[narration]');
+      filters.add('[$ambientIndex:a]volume=0.20[music]');
+      filters.add('[narration][music]'
+          'amix=inputs=2:duration=longest:normalize=0[aout]');
+
+      final filterComplex = filters.join(';');
       final command =
           "-y "
-          "-f concat -safe 0 "
-          "-i '${concatFile.path}' "
+          "-f concat -safe 0 -i '${concatFile.path}' "
+          "$narrationInputs"
           "-i '${ambientAudio.path}' "
+          '-filter_complex "$filterComplex" '
+          '-map 0:v:0 -map "[aout]" '
           '-vf "$filter" '
-          '-map 0:v:0 '
-          '-map 1:a:0 '
-          '-c:v mpeg4 '
-          '-q:v 5 '
-          '-r $framesPerSecond '
-          '-c:a aac '
-          '-b:a 96k '
-          '-af "volume=0.75" '
-          '-t $totalSeconds '
-          '-shortest '
-          '-movflags +faststart '
+          '-c:v mpeg4 -q:v 5 -r $framesPerSecond '
+          '-c:a aac -b:a 128k -t $totalSeconds '
+          '-shortest -movflags +faststart '
           "'${output.path}'";
 
       final session = await FFmpegKit.execute(command);
@@ -229,6 +251,7 @@ class ChronicleVideoExporter {
     required File file,
     required String projectTitle,
     required String sceneTitle,
+    required String subtitleText,
     required int sceneNumber,
     required int totalScenes,
   }) async {
@@ -691,6 +714,22 @@ class ChronicleVideoExporter {
         ..strokeWidth = 2,
     );
 
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(52, 845, 616, 150),
+        const Radius.circular(18),
+      ),
+      Paint()..color = const Color(0xE6090B0C),
+    );
+    drawText(
+      subtitleText,
+      870,
+      25,
+      Colors.white,
+      weight: FontWeight.w600,
+      maxLines: 3,
+      maxWidth: 555,
+    );
     drawText(
       projectTitle,
       720,
