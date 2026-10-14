@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
+import 'services/video_exporter.dart';
 
 void main() {
   runApp(const ChronicleAI());
@@ -564,6 +566,7 @@ class AutomaticGeneratorScreen extends StatefulWidget {
 
 class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
   final topicController = TextEditingController();
+  final descriptionController = TextEditingController();
   String duration = '3 minutes';
   String style = 'Cinematic Realism';
   String voice = 'Deep Documentary';
@@ -571,6 +574,7 @@ class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
   @override
   void dispose() {
     topicController.dispose();
+    descriptionController.dispose();
     super.dispose();
   }
 
@@ -593,10 +597,38 @@ class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
               alignLabelWithHint: true,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 22),
+          const FieldLabel('VIDEO DESCRIPTION'),
+          TextField(
+            controller: descriptionController,
+            minLines: 2,
+            maxLines: 4,
+            maxLength: 300,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Write a short caption for TikTok or other platforms...',
+              alignLabelWithHint: true,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                final input = topicController.text.trim();
+                if (input.isEmpty) {
+                  showMessage(context, 'Enter a topic first.');
+                  return;
+                }
+                descriptionController.text = buildVideoDescription(input);
+              },
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('Suggest description'),
+            ),
+          ),
+          const SizedBox(height: 12),
           const FieldLabel('VIDEO DURATION'),
           ChoiceChips(
-            options: const ['2 minutes', '3 minutes'],
+            options: const ['1 minute', '2 minutes', '3 minutes', '4 minutes', '5 minutes'],
             selected: duration,
             onSelected: (value) => setState(() => duration = value),
           ),
@@ -656,6 +688,9 @@ class _AutomaticGeneratorScreenState extends State<AutomaticGeneratorScreen> {
                     style: style,
                     voice: voice,
                     duration: duration,
+                    description: descriptionController.text.trim().isEmpty
+                        ? buildVideoDescription(topicController.text.trim())
+                        : descriptionController.text.trim(),
                   ),
                 ),
               );
@@ -676,6 +711,7 @@ class PasteGeneratorScreen extends StatefulWidget {
 
 class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
   final scriptController = TextEditingController();
+  final descriptionController = TextEditingController();
   String duration = '3 minutes';
   String style = 'Cinematic Realism';
   String voice = 'Deep Documentary';
@@ -683,6 +719,7 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
   @override
   void dispose() {
     scriptController.dispose();
+    descriptionController.dispose();
     super.dispose();
   }
 
@@ -721,10 +758,38 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
               );
             },
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 22),
+          const FieldLabel('VIDEO DESCRIPTION'),
+          TextField(
+            controller: descriptionController,
+            minLines: 2,
+            maxLines: 4,
+            maxLength: 300,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Write a short caption for TikTok or other platforms...',
+              alignLabelWithHint: true,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                final input = scriptController.text.trim();
+                if (input.isEmpty) {
+                  showMessage(context, 'Paste your script first.');
+                  return;
+                }
+                descriptionController.text = buildVideoDescription(input);
+              },
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('Suggest description'),
+            ),
+          ),
+          const SizedBox(height: 12),
           const FieldLabel('VIDEO DURATION'),
           ChoiceChips(
-            options: const ['2 minutes', '3 minutes'],
+            options: const ['1 minute', '2 minutes', '3 minutes', '4 minutes', '5 minutes'],
             selected: duration,
             onSelected: (value) => setState(() => duration = value),
           ),
@@ -778,6 +843,9 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
                     style: style,
                     voice: voice,
                     duration: duration,
+                    description: descriptionController.text.trim().isEmpty
+                        ? buildVideoDescription(script)
+                        : descriptionController.text.trim(),
                     pastedScript: true,
                   ),
                 ),
@@ -790,6 +858,186 @@ class _PasteGeneratorScreenState extends State<PasteGeneratorScreen> {
   }
 }
 
+
+List<String> buildSceneTitles(String input, int sceneCount) {
+  final cleanInput = input.trim();
+  final count = sceneCount.clamp(1, 20);
+
+  if (cleanInput.isEmpty) {
+    return List.generate(
+      count,
+      (index) => 'Historical chapter ${index + 1}',
+    );
+  }
+
+  // Split pasted scripts into sentences or paragraphs when possible.
+  final parts = cleanInput
+      .split(RegExp(r'(?<=[.!?])\s+|\n+'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+
+  if (parts.length >= count) {
+    return List.generate(count, (index) => parts[index]);
+  }
+
+  // For a short topic, create clear title-card chapter headings.
+  if (parts.length <= 1) {
+    final topic = cleanInput.length > 110
+        ? '${cleanInput.substring(0, 107)}...'
+        : cleanInput;
+
+    const chapterNames = [
+      'The world before',
+      'The origins and rise of',
+      'A turning point in',
+      'The legacy of',
+      'The people behind',
+      'The lasting impact of',
+      'The historical significance of',
+      'Lessons from',
+    ];
+
+    return List.generate(count, (index) {
+      final chapter = chapterNames[index % chapterNames.length];
+      return '$chapter $topic';
+    });
+  }
+
+  // Combine short scripts into the requested number of scenes.
+  return List.generate(count, (index) {
+    final start = index * parts.length ~/ count;
+    var end = (index + 1) * parts.length ~/ count;
+
+    if (end <= start) end = start + 1;
+    if (end > parts.length) end = parts.length;
+
+    return parts.sublist(start, end).join(' ');
+  });
+}
+
+String buildVideoDescription(String input) {
+  final clean = input.trim().replaceAll(RegExp(r'\s+'), ' ');
+  final firstSentence = clean
+      .split(RegExp(r'(?<=[.!?])\s+'))
+      .first
+      .trim();
+  final subject = firstSentence.isEmpty
+      ? 'this fascinating story from history'
+      : firstSentence;
+  final shortSubject = subject.length > 120
+      ? '${subject.substring(0, 117)}...'
+      : subject;
+
+  final isAfricanHistory = RegExp(
+    r'\b(Africa|African|Mali|Benin|Songhai|Ghana Empire|Great Zimbabwe|'
+    r'Kush|Aksum|Ashanti|Yoruba|Zulu|Kongo|Oyo Empire)\b',
+    caseSensitive: false,
+  ).hasMatch(clean);
+
+  final hashtags = isAfricanHistory
+      ? '#AfricanHistory #HistoryTok #ChronicleAI'
+      : '#HistoryTok #History #ChronicleAI';
+
+  return 'Explore the fascinating story of "$shortSubject" and discover '
+      'the people, events, and legacy that shaped history.\n\n$hashtags';
+}
+
+Future<void> renderAndShareVideo(
+  BuildContext context, {
+  required String title,
+  required List<String> sceneTitles,
+  required String duration,
+  required String description,
+}) async {
+  var progressDialogOpen = false;
+
+  try {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => const AlertDialog(
+        backgroundColor: surface2,
+        content: Row(
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: gold,
+              ),
+            ),
+            SizedBox(width: 18),
+            Expanded(
+              child: Text(
+                'Rendering your vertical video. '
+                'This may take a while on your phone.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    progressDialogOpen = true;
+
+    if (sceneTitles.isEmpty) {
+      throw ArgumentError('At least one scene is required.');
+    }
+
+    final durationMatch = RegExp(r'\d+').firstMatch(duration);
+    final minutes = int.tryParse(durationMatch?.group(0) ?? '') ?? 3;
+
+    if (minutes < 1 || minutes > 5) {
+      throw ArgumentError('Video duration must be between 1 and 5 minutes.');
+    }
+
+    final totalDurationSeconds = minutes * 60;
+    final secondsPerScene =
+        (totalDurationSeconds + sceneTitles.length - 1) ~/ sceneTitles.length;
+
+    final file = await ChronicleVideoExporter.exportTitleCardVideo(
+      title: title,
+      sceneTitles: sceneTitles,
+      secondsPerScene: secondsPerScene,
+      totalDurationSeconds: totalDurationSeconds,
+    );
+
+    if (context.mounted && progressDialogOpen) {
+      Navigator.of(context, rootNavigator: true).pop();
+      progressDialogOpen = false;
+    }
+
+    if (!context.mounted) return;
+
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        text: description.trim().isEmpty
+            ? 'Created with Chronicle AI'
+            : '${description.trim()}\n\nCreated with Chronicle AI',
+        subject: title,
+      ),
+    );
+
+    if (context.mounted) {
+      showMessage(context, 'Video exported: ${file.path}');
+    }
+  } catch (error) {
+    if (context.mounted && progressDialogOpen) {
+      Navigator.of(context, rootNavigator: true).pop();
+      progressDialogOpen = false;
+    }
+
+    if (context.mounted) {
+      showMessage(
+        context,
+        'Video export failed. Please try again. Details: $error',
+      );
+    }
+  }
+}
+
 class PreparationScreen extends StatelessWidget {
   const PreparationScreen({
     super.key,
@@ -798,6 +1046,7 @@ class PreparationScreen extends StatelessWidget {
     required this.voice,
     required this.duration,
     this.pastedScript = false,
+    this.description = '',
   });
 
   final String topic;
@@ -805,6 +1054,7 @@ class PreparationScreen extends StatelessWidget {
   final String voice;
   final String duration;
   final bool pastedScript;
+  final String description;
 
   @override
   Widget build(BuildContext context) {
@@ -849,17 +1099,23 @@ class PreparationScreen extends StatelessWidget {
               MaterialPageRoute<void>(
                 builder: (_) => EditorScreen(
                   projectTitle: pastedScript ? 'Pasted script' : topic,
+                  projectInput: topic,
                   selectedStyle: style,
                   selectedVoice: voice,
-                ),
+                duration: duration,
+                  description: description,
+      ),
               ),
             ),
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: () => showMessage(
+            onPressed: () => renderAndShareVideo(
               context,
-              'The AI generation engine has not been connected yet.',
+              title: topic.trim().isEmpty ? 'Chronicle History' : topic.trim(),
+              sceneTitles: buildSceneTitles(topic, 4),
+      duration: duration,
+              description: description,
             ),
             icon: const Icon(Icons.auto_awesome),
             label: const Text('Generate video'),
@@ -1058,15 +1314,21 @@ class EditorScreen extends StatefulWidget {
   const EditorScreen({
     super.key,
     this.projectTitle = 'Untitled history video',
+    this.projectInput = '',
     this.selectedStyle = 'Cinematic Realism',
     this.selectedVoice = 'Deep Documentary',
+  this.duration = '3 minutes',
+    this.description = '',
   });
 
   final String projectTitle;
+  final String projectInput;
   final String selectedStyle;
   final String selectedVoice;
 
-  @override
+    final String duration;
+  final String description;
+@override
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
@@ -1076,15 +1338,31 @@ class _EditorScreenState extends State<EditorScreen> {
   String style = '';
   String voice = '';
   String activeTool = 'Scenes';
+  late final TextEditingController descriptionController;
 
   @override
   void initState() {
     super.initState();
     style = widget.selectedStyle;
     voice = widget.selectedVoice;
+    descriptionController = TextEditingController(
+      text: widget.description.trim().isNotEmpty
+          ? widget.description
+          : buildVideoDescription(
+              widget.projectInput.isNotEmpty
+                  ? widget.projectInput
+                  : widget.projectTitle,
+            ),
+    );
   }
 
-  @override
+    @override
+  void dispose() {
+    descriptionController.dispose();
+    super.dispose();
+  }
+
+@override
   Widget build(BuildContext context) {
     return PageFrame(
       title: 'Editing studio',
@@ -1205,6 +1483,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   'Music',
                   'Transitions',
                   'Style',
+                  'Description',
                 ].map((tool) {
                   return ChoiceChip(
                     label: Text(tool),
@@ -1231,10 +1510,17 @@ class _EditorScreenState extends State<EditorScreen> {
           PrimaryButton(
             label: 'Export MP4',
             icon: Icons.download_rounded,
-            onPressed: () => showMessage(
+            onPressed: () => renderAndShareVideo(
               context,
-              'Video rendering and MP4 export must be implemented '
-              'before a file can be exported.',
+              title: widget.projectTitle,
+              sceneTitles: buildSceneTitles(
+                widget.projectInput.isNotEmpty
+                    ? widget.projectInput
+                    : widget.projectTitle,
+                sceneCount,
+              ),
+              duration: widget.duration,
+              description: descriptionController.text.trim(),
             ),
           ),
         ],
@@ -1282,7 +1568,34 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ],
         );
+            case 'Description':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Video description / social caption',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: descriptionController,
+              minLines: 3,
+              maxLines: 6,
+              maxLength: 300,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Add a caption and hashtags...',
+                alignLabelWithHint: true,
+              ),
+            ),
+            const Text(
+              'This caption is included when you share the exported video.',
+              style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+            ),
+          ],
+        );
       case 'Scenes':
+
         return Text(
           'Scene ${selectedScene + 1} selected. '
           'You can add scenes and select them in the timeline. '
