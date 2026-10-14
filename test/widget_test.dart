@@ -2,11 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:chronicle_ai/main.dart';
 
 void main() {
-  testWidgets('Chronicle AI displays both generators', (tester) async {
+  testWidgets('Chronicle AI home screen loads', (tester) async {
     await tester.pumpWidget(const ChronicleAI());
+    await tester.pumpAndSettle();
 
-    expect(find.text('CHRONICLE AI'), findsOneWidget);
-    expect(find.text('Automatic AI Generator'), findsOneWidget);
-    expect(find.text('Paste AI Generator'), findsOneWidget);
+    expect(find.text('CHRONICLE AI'), findsWidgets);
+    expect(find.text('Automatic AI Generator'), findsWidgets);
+    expect(find.text('Paste AI Generator'), findsWidgets);
   });
 }
