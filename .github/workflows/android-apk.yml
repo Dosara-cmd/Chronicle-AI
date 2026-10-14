@@ -30,6 +30,12 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Verify Flutter project
+        run: |
+          test -f pubspec.yaml
+          test -f android/app/build.gradle || test -f android/app/build.gradle.kts
+          echo "Flutter project files found."
+
       - name: Get dependencies
         run: flutter pub get
 
