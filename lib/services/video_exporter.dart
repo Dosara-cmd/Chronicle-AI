@@ -17,6 +17,8 @@ class ChronicleVideoExporter {
     required String title,
     String style = 'Cinematic Realism',
     required List<String> sceneTitles,
+    List<String>? sceneDescriptions,
+    List<String>? subtitleTexts,
     int secondsPerScene = 30,
     int? totalDurationSeconds,
     required List<String> narrationAudioPaths,
@@ -53,16 +55,27 @@ class ChronicleVideoExporter {
 
     try {
       final imageFiles = <File>[];
+      final descriptions = sceneDescriptions ?? sceneTitles;
+      final subtitles = subtitleTexts ?? sceneTitles;
 
       for (var index = 0; index < sceneTitles.length; index++) {
         final imageFile = File('${workDirectory.path}/scene_${index + 1}.png');
+        final fallbackText = sceneTitles[index];
+        final description = index < descriptions.length &&
+                descriptions[index].trim().isNotEmpty
+            ? descriptions[index].trim()
+            : fallbackText;
+        final subtitle = index < subtitles.length &&
+                subtitles[index].trim().isNotEmpty
+            ? subtitles[index].trim()
+            : fallbackText;
 
         await _drawSceneCard(
           file: imageFile,
           style: style,
           projectTitle: title,
-          sceneTitle: sceneTitles[index],
-          subtitleText: sceneTitles[index],
+          sceneTitle: description,
+          subtitleText: subtitle,
           sceneNumber: index + 1,
           totalScenes: sceneTitles.length,
         );

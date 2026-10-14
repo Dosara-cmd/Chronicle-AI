@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'services/video_exporter.dart';
 import 'services/narration_service.dart';
 import 'services/video_library_service.dart';
+import 'services/project_storage_service.dart';
 
 void main() {
   runApp(const ChronicleAI());
@@ -960,6 +961,8 @@ Future<void> renderAndShareVideo(
   String style = 'Cinematic Realism',
   required String title,
   required List<String> sceneTitles,
+  List<String>? sceneDescriptions,
+  List<String>? subtitleTexts,
   required String duration,
   required String description,
   required String voice,
@@ -1007,6 +1010,8 @@ Future<void> renderAndShareVideo(
       title: title,
       style: style,
       sceneTitles: sceneTitles,
+      sceneDescriptions: sceneDescriptions,
+      subtitleTexts: subtitleTexts,
       secondsPerScene: perScene,
       totalDurationSeconds: seconds,
       narrationAudioPaths: narrationPaths,
@@ -1438,6 +1443,7 @@ class PreparationScreen extends StatelessWidget {
             onPressed: () => renderAndShareVideo(
               context,
               title: topic.trim().isEmpty ? 'Chronicle History' : topic.trim(),
+              style: style,
               voice: voice,
               sceneTitles: buildSceneTitles(topic, 4),
               duration: duration,
@@ -1645,8 +1651,16 @@ class EditorScreen extends StatefulWidget {
     this.selectedVoice = 'Deep Documentary',
     this.duration = '3 minutes',
     this.description = '',
+    this.projectId = '',
+    this.initialSceneTexts,
+    this.initialSceneDescriptions,
+    this.initialSubtitleTexts,
   });
 
+  final String projectId;
+  final List<String>? initialSceneTexts;
+  final List<String>? initialSceneDescriptions;
+  final List<String>? initialSubtitleTexts;
   final String projectTitle;
   final String projectInput;
   final String selectedStyle;
@@ -1662,7 +1676,12 @@ class _EditorScreenState extends State<EditorScreen> {
   int selectedScene = 0;
   String style = '';
   late List<String> sceneTitles;
+  late List<String> sceneDescriptions;
+  late List<String> subtitleTexts;
+  late String currentProjectId;
   late final TextEditingController sceneTextController;
+  late final TextEditingController sceneDescriptionController;
+  late final TextEditingController subtitleTextController;
   String voice = '';
   String activeTool = 'Scenes';
   late final TextEditingController descriptionController;
@@ -1672,13 +1691,31 @@ class _EditorScreenState extends State<EditorScreen> {
     super.initState();
     style = widget.selectedStyle;
     voice = widget.selectedVoice;
-    sceneTitles = buildSceneTitles(
-      widget.projectInput.trim().isNotEmpty
-          ? widget.projectInput
-          : widget.projectTitle,
-      4,
+    currentProjectId = widget.projectId;
+    sceneTitles = widget.initialSceneTexts != null &&
+            widget.initialSceneTexts!.isNotEmpty
+        ? List<String>.from(widget.initialSceneTexts!)
+        : buildSceneTitles(
+            widget.projectInput.trim().isNotEmpty
+                ? widget.projectInput
+                : widget.projectTitle,
+            4,
+          );
+    sceneDescriptions = _initialTrack(
+      widget.initialSceneDescriptions,
+      sceneTitles,
+    );
+    subtitleTexts = _initialTrack(
+      widget.initialSubtitleTexts,
+      sceneTitles,
     );
     sceneTextController = TextEditingController(text: sceneTitles.first);
+    sceneDescriptionController = TextEditingController(
+      text: sceneDescriptions.first,
+    );
+    subtitleTextController = TextEditingController(
+      text: subtitleTexts.first,
+    );
     descriptionController = TextEditingController(
       text: widget.description.trim().isNotEmpty
           ? widget.description
@@ -1690,11 +1727,67 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  List<String> _initialTrack(
+    List<String>? saved,
+    List<String> fallback,
+  ) {
+    if (saved != null && saved.length == fallback.length) {
+      return List<String>.from(saved);
+    }
+    return List<String>.from(fallback);
+  }
+
   @override
   void dispose() {
     descriptionController.dispose();
     sceneTextController.dispose();
+    sceneDescriptionController.dispose();
+    subtitleTextController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveProject() async {
+    try {
+      final scenes = _currentSceneTitles();
+      if (scenes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Add at least one non-empty scene first.')),
+        );
+        return;
+      }
+
+      if (currentProjectId.isEmpty) {
+        currentProjectId = DateTime.now().microsecondsSinceEpoch.toString();
+      }
+
+      await ChronicleProjectStorage.save(
+        ChronicleProject(
+          id: currentProjectId,
+          title: widget.projectTitle.trim().isEmpty
+              ? 'Untitled history video'
+              : widget.projectTitle.trim(),
+          input: widget.projectInput,
+          style: style,
+          voice: voice,
+          duration: widget.duration,
+          description: descriptionController.text.trim(),
+          sceneTexts: List<String>.from(sceneTitles),
+          sceneDescriptions: _currentSceneDescriptions(),
+          subtitleTexts: _currentSubtitleTexts(),
+          updatedAt: DateTime.now(),
+        ),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Project saved on this device.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save project: $error')),
+      );
+    }
   }
 
   void _saveSelectedSceneText() {
@@ -1704,13 +1797,19 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     sceneTitles[selectedScene] = sceneTextController.text.trim();
+    sceneDescriptions[selectedScene] =
+        sceneDescriptionController.text.trim();
+    subtitleTexts[selectedScene] = subtitleTextController.text.trim();
   }
 
   void _selectScene(int index) {
+    if (index < 0 || index >= sceneTitles.length) return;
     _saveSelectedSceneText();
     setState(() {
       selectedScene = index;
       sceneTextController.text = sceneTitles[index];
+      sceneDescriptionController.text = sceneDescriptions[index];
+      subtitleTextController.text = subtitleTexts[index];
       sceneTextController.selection = TextSelection.collapsed(
         offset: sceneTextController.text.length,
       );
@@ -1726,9 +1825,14 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     setState(() {
-      sceneTitles.add('New historical scene');
+      const newScene = 'New historical scene';
+      sceneTitles.add(newScene);
+      sceneDescriptions.add(newScene);
+      subtitleTexts.add(newScene);
       selectedScene = sceneTitles.length - 1;
-      sceneTextController.text = sceneTitles[selectedScene];
+      sceneTextController.text = newScene;
+      sceneDescriptionController.text = newScene;
+      subtitleTextController.text = newScene;
     });
   }
 
@@ -1737,11 +1841,30 @@ class _EditorScreenState extends State<EditorScreen> {
     final destination = selectedScene + direction;
     if (destination < 0 || destination >= sceneTitles.length) return;
     setState(() {
-      final item = sceneTitles.removeAt(selectedScene);
-      sceneTitles.insert(destination, item);
+      final title = sceneTitles.removeAt(selectedScene);
+      sceneTitles.insert(destination, title);
+
+      final sceneDescription = sceneDescriptions.removeAt(selectedScene);
+      sceneDescriptions.insert(destination, sceneDescription);
+
+      final subtitle = subtitleTexts.removeAt(selectedScene);
+      subtitleTexts.insert(destination, subtitle);
+
       selectedScene = destination;
       sceneTextController.text = sceneTitles[selectedScene];
+      sceneDescriptionController.text = sceneDescriptions[selectedScene];
+      subtitleTextController.text = subtitleTexts[selectedScene];
     });
+  }
+
+  List<String> _currentSceneDescriptions() {
+    _saveSelectedSceneText();
+    return List<String>.from(sceneDescriptions);
+  }
+
+  List<String> _currentSubtitleTexts() {
+    _saveSelectedSceneText();
+    return List<String>.from(subtitleTexts);
   }
 
   List<String> _currentSceneTitles() {
@@ -1765,6 +1888,8 @@ class _EditorScreenState extends State<EditorScreen> {
               context,
               title: widget.projectTitle,
               sceneTitles: _currentSceneTitles(),
+              sceneDescriptions: _currentSceneDescriptions(),
+              subtitleTexts: _currentSubtitleTexts(),
               style: style,
               duration: widget.duration,
               description: descriptionController.text,
@@ -1869,6 +1994,17 @@ class _EditorScreenState extends State<EditorScreen> {
             child: toolPanel(),
           ),
           const SizedBox(height: 22),
+          OutlinedButton.icon(
+            onPressed: _saveProject,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save project'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: gold,
+              side: const BorderSide(color: gold),
+              minimumSize: const Size.fromHeight(50),
+            ),
+          ),
+          const SizedBox(height: 12),
           PrimaryButton(
             label: 'Export MP4',
             icon: Icons.download_rounded,
@@ -1877,6 +2013,8 @@ class _EditorScreenState extends State<EditorScreen> {
               title: widget.projectTitle,
               voice: voice,
               sceneTitles: _currentSceneTitles(),
+              sceneDescriptions: _currentSceneDescriptions(),
+              subtitleTexts: _currentSubtitleTexts(),
               style: style,
               duration: widget.duration,
               description: descriptionController.text.trim(),
@@ -1947,10 +2085,38 @@ class _EditorScreenState extends State<EditorScreen> {
                 alignLabelWithHint: true,
               ),
             ),
-            const Text(
-              'This caption is included when you share the exported video.',
-              style: TextStyle(color: muted, fontSize: 12, height: 1.5),
-            ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final caption = descriptionController.text.trim();
+                    if (caption.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Add a caption before copying it.'),
+                        ),
+                      );
+                      return;
+                    }
+                    await Clipboard.setData(ClipboardData(text: caption));
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Caption copied to clipboard.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.copy_rounded),
+                  label: const Text('Copy caption'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This caption is included when you share the exported video.',
+                style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+              ),
           ],
         );
       case 'Scenes':
@@ -1966,7 +2132,9 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
             const SizedBox(height: 10),
             TextField(
-              controller: sceneTextController,
+              controller: activeTool == 'Scenes'
+                  ? sceneDescriptionController
+                  : sceneTextController,
               minLines: 4,
               maxLines: 10,
               maxLength: 3500,
@@ -1980,7 +2148,17 @@ class _EditorScreenState extends State<EditorScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              onChanged: (_) => _saveSelectedSceneText(),
+              onChanged: (value) {
+                if (sceneTitles.isEmpty ||
+                    selectedScene >= sceneTitles.length) {
+                  return;
+                }
+                if (activeTool == 'Scenes') {
+                  sceneDescriptions[selectedScene] = value.trim();
+                } else {
+                  sceneTitles[selectedScene] = value.trim();
+                }
+              },
             ),
             const SizedBox(height: 8),
             Row(
@@ -2015,10 +2193,37 @@ class _EditorScreenState extends State<EditorScreen> {
           ],
         );
       case 'Subtitles':
-        return const Text(
-          'Subtitle timing, text, position, and styling will be '
-          'implemented with the rendering pipeline.',
-          style: TextStyle(color: muted, height: 1.6),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Subtitle for scene ${selectedScene + 1}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: subtitleTextController,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 500,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Enter the subtitle for this scene...',
+                alignLabelWithHint: true,
+              ),
+              onChanged: (value) {
+                if (subtitleTexts.isNotEmpty &&
+                    selectedScene < subtitleTexts.length) {
+                  subtitleTexts[selectedScene] = value.trim();
+                }
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Subtitle text is passed to the current illustrated video renderer.',
+              style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+            ),
+          ],
         );
       case 'Music':
         return const Text(
@@ -2035,49 +2240,178 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 }
 
-class ProjectsScreen extends StatelessWidget {
+class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
+
+  @override
+  State<ProjectsScreen> createState() => _ProjectsScreenState();
+}
+
+class _ProjectsScreenState extends State<ProjectsScreen> {
+  late Future<List<ChronicleProject>> _projectsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    _projectsFuture = ChronicleProjectStorage.loadAll();
+  }
+
+  Future<void> _deleteProject(ChronicleProject project) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: surface2,
+        title: const Text('Delete project?'),
+        content: Text('Delete "${project.title}" from this device?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await ChronicleProjectStorage.delete(project.id);
+    if (!mounted) return;
+    setState(_reload);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Project deleted.')),
+    );
+  }
+
+  void _openProject(ChronicleProject project) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => EditorScreen(
+          projectId: project.id,
+          projectTitle: project.title,
+          projectInput: project.input,
+          selectedStyle: project.style,
+          selectedVoice: project.voice,
+          duration: project.duration,
+          description: project.description,
+          initialSceneTexts: project.sceneTexts,
+          initialSceneDescriptions: project.sceneDescriptions,
+          initialSubtitleTexts: project.subtitleTexts,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) setState(_reload);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return PageFrame(
       title: 'My videos',
-      subtitle: 'Your history projects will appear here.',
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 42),
-            decoration: BoxDecoration(
-              color: surface,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: const Column(
-              children: [
-                Icon(Icons.video_library_outlined, color: gold, size: 52),
-                SizedBox(height: 18),
-                Text(
-                  'Your story starts here',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+      subtitle: 'Saved history projects on this device.',
+      child: FutureBuilder<List<ChronicleProject>>(
+        future: _projectsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: CircularProgressIndicator(color: gold),
+              ),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return NoticeCard(
+              text: 'Could not load saved projects: ${snapshot.error}',
+            );
+          }
+
+          final projects = snapshot.data ?? <ChronicleProject>[];
+          if (projects.isEmpty) {
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 42),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.video_library_outlined, color: gold, size: 52),
+                  SizedBox(height: 18),
+                  Text(
+                    'Your story starts here',
+                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Open a project in the Editing Studio and tap Save project. '
+                    'Saved projects will appear here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: muted, height: 1.6, fontSize: 13),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return Column(
+            children: projects.map((project) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0x22222222),
+                      child: Icon(Icons.movie_creation_outlined, color: gold),
+                    ),
+                    title: Text(
+                      project.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      '${project.style} • ${project.sceneTexts.length} scenes\n'
+                      'Updated ${project.updatedAt.toLocal()}',
+                      style: const TextStyle(color: muted, fontSize: 11),
+                    ),
+                    isThreeLine: true,
+                    onTap: () => _openProject(project),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (value) {
+                        if (value == 'open') _openProject(project);
+                        if (value == 'delete') _deleteProject(project);
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'open', child: Text('Open project')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete project')),
+                      ],
+                    ),
+                  ),
                 ),
-                SizedBox(height: 8),
-                Text(
-                  'Projects will be listed here when persistent '
-                  'project storage is implemented.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: muted, height: 1.6, fontSize: 13),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          const NoticeCard(
-            text:
-                'Project saving and reopening are planned features; '
-                'this initial version does not persist generated videos.',
-          ),
-        ],
+              );
+            }).toList(),
+          );
+        },
       ),
     );
   }
