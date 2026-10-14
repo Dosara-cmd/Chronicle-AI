@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'services/video_exporter.dart';
 import 'services/narration_service.dart';
+import 'services/video_library_service.dart';
 
 void main() {
   runApp(const ChronicleAI());
@@ -1108,6 +1110,7 @@ class _ChronicleVideoPreviewScreenState
     extends State<ChronicleVideoPreviewScreen> {
   late final VideoPlayerController _controller;
   String? _error;
+  bool _savingVideo = false;
 
   @override
   void initState() {
@@ -1150,6 +1153,62 @@ class _ChronicleVideoPreviewScreenState
         subject: widget.title,
       ),
     );
+  }
+
+  Future<void> _saveVideoToPhone() async {
+    if (_savingVideo) return;
+
+    setState(() => _savingVideo = true);
+
+    try {
+      final safeTitle = widget.title
+          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+          .trim();
+      final timestamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .replaceAll('.', '-');
+
+      final name =
+          '${safeTitle.isEmpty ? "Chronicle" : safeTitle}'
+          '_$timestamp.mp4';
+
+      await VideoLibraryService.saveVideo(
+        sourcePath: widget.file.path,
+        displayName: name,
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Video saved to Movies/Chronicle AI.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.message ?? 'Unable to save the video to your phone.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save video: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingVideo = false);
+    }
   }
 
   String _time(Duration duration) {
@@ -1271,8 +1330,28 @@ class _ChronicleVideoPreviewScreenState
               ),
             ),
             const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _savingVideo ? null : _saveVideoToPhone,
+              icon: _savingVideo
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: gold,
+                      ),
+                    )
+                  : const Icon(Icons.save_alt_rounded),
+              label: Text(_savingVideo ? 'Saving video...' : 'Save to phone'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: gold,
+                side: BorderSide(color: gold.withValues(alpha: 0.65)),
+                minimumSize: const Size.fromHeight(52),
+              ),
+            ),
+            const SizedBox(height: 10),
             Text(
-              'Saved video: ${widget.file.path}',
+              'Temporary preview file: ${widget.file.path}',
               style: const TextStyle(color: muted, fontSize: 11),
             ),
           ],
