@@ -15,6 +15,7 @@ class ChronicleVideoExporter {
 
   static Future<File> exportTitleCardVideo({
     required String title,
+    String style = 'Cinematic Realism',
     required List<String> sceneTitles,
     int secondsPerScene = 30,
     int? totalDurationSeconds,
@@ -54,12 +55,11 @@ class ChronicleVideoExporter {
       final imageFiles = <File>[];
 
       for (var index = 0; index < sceneTitles.length; index++) {
-        final imageFile = File(
-          '${workDirectory.path}/scene_${index + 1}.png',
-        );
+        final imageFile = File('${workDirectory.path}/scene_${index + 1}.png');
 
         await _drawSceneCard(
           file: imageFile,
+          style: style,
           projectTitle: title,
           sceneTitle: sceneTitles[index],
           subtitleText: sceneTitles[index],
@@ -76,7 +76,8 @@ class ChronicleVideoExporter {
         imageFiles.map((file) => "file '${file.path}'").join('\n'),
       );
 
-      final totalSeconds = totalDurationSeconds ?? sceneTitles.length * secondsPerScene;
+      final totalSeconds =
+          totalDurationSeconds ?? sceneTitles.length * secondsPerScene;
       final framesPerScene = secondsPerScene * framesPerSecond;
 
       final filter =
@@ -86,17 +87,11 @@ class ChronicleVideoExporter {
           'fps=$framesPerSecond,'
           'format=yuv420p';
 
-      final ambientAudio = File(
-        '${workDirectory.path}/cinematic_ambient.wav',
-      );
+      final ambientAudio = File('${workDirectory.path}/cinematic_ambient.wav');
 
-      await _writeAmbientWav(
-        file: ambientAudio,
-        durationSeconds: totalSeconds,
-      );
+      await _writeAmbientWav(file: ambientAudio, durationSeconds: totalSeconds);
 
-      final narrationInputs =
-          narrationAudioPaths.map((p) => "-i '$p' ").join();
+      final narrationInputs = narrationAudioPaths.map((p) => "-i '$p' ").join();
       final filters = <String>[];
 
       for (var i = 0; i < narrationAudioPaths.length; i++) {
@@ -108,14 +103,19 @@ class ChronicleVideoExporter {
       }
 
       final labels = List.generate(
-        narrationAudioPaths.length, (i) => '[n$i]',
+        narrationAudioPaths.length,
+        (i) => '[n$i]',
       ).join();
       final ambientIndex = narrationAudioPaths.length + 1;
-      filters.add('$labels'
-          'concat=n=${narrationAudioPaths.length}:v=0:a=1[narration]');
+      filters.add(
+        '$labels'
+        'concat=n=${narrationAudioPaths.length}:v=0:a=1[narration]',
+      );
       filters.add('[$ambientIndex:a]volume=0.20[music]');
-      filters.add('[narration][music]'
-          'amix=inputs=2:duration=longest:normalize=0[aout]');
+      filters.add(
+        '[narration][music]'
+        'amix=inputs=2:duration=longest:normalize=0[aout]',
+      );
 
       final filterComplex = filters.join(';');
       final command =
@@ -197,10 +197,7 @@ class ChronicleVideoExporter {
       var frame = 0;
 
       while (frame < totalFrames) {
-        final chunkFrames = math.min(
-          framesPerChunk,
-          totalFrames - frame,
-        );
+        final chunkFrames = math.min(framesPerChunk, totalFrames - frame);
 
         final chunk = ByteData(chunkFrames * bytesPerFrame);
 
@@ -216,16 +213,17 @@ class ChronicleVideoExporter {
 
           // Slowly moving amplitude prevents the sound from feeling
           // completely static while keeping it subtle beneath narration.
-          final movement =
-              0.82 + 0.18 * math.sin(2 * math.pi * 0.075 * time);
+          final movement = 0.82 + 0.18 * math.sin(2 * math.pi * 0.075 * time);
 
           final fadeIn = math.min(1.0, time / 3.0);
           final remaining = durationSeconds - time;
           final fadeOut = math.min(1.0, remaining / 4.0);
 
           final envelope = math.min(fadeIn, fadeOut);
-          final normalized = (tone * movement * envelope * 0.12)
-              .clamp(-1.0, 1.0);
+          final normalized = (tone * movement * envelope * 0.12).clamp(
+            -1.0,
+            1.0,
+          );
 
           final sample = (normalized * 32767).round();
           final offset = i * bytesPerFrame;
@@ -246,9 +244,9 @@ class ChronicleVideoExporter {
     }
   }
 
-
   static Future<void> _drawSceneCard({
     required File file,
+    required String style,
     required String projectTitle,
     required String sceneTitle,
     required String subtitleText,
@@ -261,22 +259,57 @@ class ChronicleVideoExporter {
       Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
     );
 
-    final bounds = Rect.fromLTWH(
-      0,
-      0,
-      width.toDouble(),
-      height.toDouble(),
-    );
+    final bounds = Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble());
 
-    // Rotate through several premium historical palettes.
-    // These are stylized illustrations, not photographs or AI footage.
-    final palettes = <List<Color>>[
-      [const Color(0xFF34302A), const Color(0xFF171513), const Color(0xFF080909)],
-      [const Color(0xFF27343B), const Color(0xFF131C22), const Color(0xFF080B0E)],
-      [const Color(0xFF393026), const Color(0xFF1B1713), const Color(0xFF090909)],
-      [const Color(0xFF302D37), const Color(0xFF19171F), const Color(0xFF080909)],
-    ];
-    final palette = palettes[(sceneNumber - 1) % palettes.length];
+    // Style-specific palettes. These remain illustrated scenes, not AI footage.
+    final normalizedStyle = style.toLowerCase();
+    final palette = normalizedStyle == 'dark history'
+        ? <Color>[
+            const Color(0xFF202020),
+            const Color(0xFF101010),
+            const Color(0xFF050505),
+          ]
+        : normalizedStyle == 'african history'
+        ? <Color>[
+            const Color(0xFF59402C),
+            const Color(0xFF2D2118),
+            const Color(0xFF100D09),
+          ]
+        : normalizedStyle == 'documentary'
+        ? <Color>[
+            const Color(0xFF34434A),
+            const Color(0xFF1B272D),
+            const Color(0xFF080D10),
+          ]
+        : normalizedStyle == '3d animation'
+        ? <Color>[
+            const Color(0xFF66502D),
+            const Color(0xFF30261A),
+            const Color(0xFF100D09),
+          ]
+        : normalizedStyle == 'ancient world'
+        ? <Color>[
+            const Color(0xFF685034),
+            const Color(0xFF302418),
+            const Color(0xFF100C08),
+          ]
+        : normalizedStyle == 'epic history'
+        ? <Color>[
+            const Color(0xFF55352D),
+            const Color(0xFF2A1B18),
+            const Color(0xFF0C0908),
+          ]
+        : normalizedStyle == 'historical illustration'
+        ? <Color>[
+            const Color(0xFF48423A),
+            const Color(0xFF27231E),
+            const Color(0xFF0C0B09),
+          ]
+        : <Color>[
+            const Color(0xFF34302A),
+            const Color(0xFF171513),
+            const Color(0xFF080909),
+          ];
     final gold = const Color(0xFFD8B46A);
     final pale = const Color(0xFFE6DFD0);
     final muted = const Color(0xFFB6B6B6);
@@ -317,16 +350,19 @@ class ChronicleVideoExporter {
         ..close();
       canvas.drawPath(
         ray,
-        Paint()..color = Colors.white.withValues(alpha: i.isEven ? 0.018 : 0.009),
+        Paint()
+          ..color = Colors.white.withValues(alpha: i.isEven ? 0.018 : 0.009),
       );
     }
 
     // A scene illustration changes according to historical subject keywords.
     final subject = '$projectTitle $sceneTitle'.toLowerCase();
-    final isEgypt = subject.contains('egypt') ||
+    final isEgypt =
+        subject.contains('egypt') ||
         subject.contains('pharaoh') ||
         subject.contains('pyramid');
-    final isAfrica = subject.contains('africa') ||
+    final isAfrica =
+        subject.contains('africa') ||
         subject.contains('african') ||
         subject.contains('mali') ||
         subject.contains('songhai') ||
@@ -338,19 +374,22 @@ class ChronicleVideoExporter {
         subject.contains('aksum') ||
         subject.contains('zulu') ||
         subject.contains('kongo');
-    final isWar = subject.contains('war') ||
+    final isWar =
+        subject.contains('war') ||
         subject.contains('battle') ||
         subject.contains('army') ||
         subject.contains('soldier') ||
         subject.contains('revolution') ||
         subject.contains('invasion');
-    final isSea = subject.contains('ocean') ||
+    final isSea =
+        subject.contains('ocean') ||
         subject.contains('sea') ||
         subject.contains('ship') ||
         subject.contains('voyage') ||
         subject.contains('trade route') ||
         subject.contains('exploration');
-    final isAncient = subject.contains('ancient') ||
+    final isAncient =
+        subject.contains('ancient') ||
         subject.contains('empire') ||
         subject.contains('kingdom') ||
         subject.contains('roman') ||
@@ -434,10 +473,7 @@ class ChronicleVideoExporter {
         ..lineTo(245, 535)
         ..lineTo(355, 535)
         ..close();
-      canvas.drawPath(
-        sail,
-        Paint()..color = gold.withValues(alpha: 0.19),
-      );
+      canvas.drawPath(sail, Paint()..color = gold.withValues(alpha: 0.19));
       final secondSail = Path()
         ..moveTo(375, 435)
         ..lineTo(470, 535)
@@ -463,10 +499,7 @@ class ChronicleVideoExporter {
           ..lineTo(x + 50, 470 + (i % 2) * 35)
           ..lineTo(x, 500 + (i % 2) * 35)
           ..close();
-        canvas.drawPath(
-          banner,
-          Paint()..color = gold.withValues(alpha: 0.23),
-        );
+        canvas.drawPath(banner, Paint()..color = gold.withValues(alpha: 0.23));
       }
       for (var i = 0; i < 4; i++) {
         final x = 145.0 + i * 145;
@@ -637,10 +670,7 @@ class ChronicleVideoExporter {
         ellipsis: '…',
       )..layout(maxWidth: maxWidth);
 
-      painter.paint(
-        canvas,
-        Offset((width - painter.width) / 2, top),
-      );
+      painter.paint(canvas, Offset((width - painter.width) / 2, top));
     }
 
     drawText(
@@ -651,13 +681,7 @@ class ChronicleVideoExporter {
       weight: FontWeight.w800,
       letterSpacing: 5,
     );
-    drawText(
-      'BRING THE PAST TO LIFE',
-      160,
-      14,
-      muted,
-      letterSpacing: 2.4,
-    );
+    drawText('BRING THE PAST TO LIFE', 160, 14, muted, letterSpacing: 2.4);
 
     canvas.drawLine(
       const Offset(260, 225),
@@ -740,13 +764,7 @@ class ChronicleVideoExporter {
       maxWidth: 550,
     );
 
-    drawText(
-      'HISTORY  •  STORY  •  LEGACY',
-      1080,
-      15,
-      muted,
-      letterSpacing: 2,
-    );
+    drawText('HISTORY  •  STORY  •  LEGACY', 1080, 15, muted, letterSpacing: 2);
 
     drawText(
       'CHRONICLE AI',
@@ -761,16 +779,11 @@ class ChronicleVideoExporter {
     final image = await picture.toImage(width, height);
 
     try {
-      final bytes = await image.toByteData(
-        format: ui.ImageByteFormat.png,
-      );
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       if (bytes == null) {
         throw Exception('Could not encode a scene image.');
       }
-      await file.writeAsBytes(
-        bytes.buffer.asUint8List(),
-        flush: true,
-      );
+      await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
     } finally {
       image.dispose();
     }

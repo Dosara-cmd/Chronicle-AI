@@ -957,6 +957,7 @@ String buildVideoDescription(String input) {
 
 Future<void> renderAndShareVideo(
   BuildContext context, {
+  String style = 'Cinematic Realism',
   required String title,
   required List<String> sceneTitles,
   required String duration,
@@ -1004,6 +1005,7 @@ Future<void> renderAndShareVideo(
 
     final file = await ChronicleVideoExporter.exportTitleCardVideo(
       title: title,
+      style: style,
       sceneTitles: sceneTitles,
       secondsPerScene: perScene,
       totalDurationSeconds: seconds,
@@ -1657,9 +1659,10 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
-  int sceneCount = 4;
   int selectedScene = 0;
   String style = '';
+  late List<String> sceneTitles;
+  late final TextEditingController sceneTextController;
   String voice = '';
   String activeTool = 'Scenes';
   late final TextEditingController descriptionController;
@@ -1669,6 +1672,13 @@ class _EditorScreenState extends State<EditorScreen> {
     super.initState();
     style = widget.selectedStyle;
     voice = widget.selectedVoice;
+    sceneTitles = buildSceneTitles(
+      widget.projectInput.trim().isNotEmpty
+          ? widget.projectInput
+          : widget.projectTitle,
+      4,
+    );
+    sceneTextController = TextEditingController(text: sceneTitles.first);
     descriptionController = TextEditingController(
       text: widget.description.trim().isNotEmpty
           ? widget.description
@@ -1683,7 +1693,63 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     descriptionController.dispose();
+    sceneTextController.dispose();
     super.dispose();
+  }
+
+  void _saveSelectedSceneText() {
+    if (sceneTitles.isEmpty ||
+        selectedScene < 0 ||
+        selectedScene >= sceneTitles.length) {
+      return;
+    }
+    sceneTitles[selectedScene] = sceneTextController.text.trim();
+  }
+
+  void _selectScene(int index) {
+    _saveSelectedSceneText();
+    setState(() {
+      selectedScene = index;
+      sceneTextController.text = sceneTitles[index];
+      sceneTextController.selection = TextSelection.collapsed(
+        offset: sceneTextController.text.length,
+      );
+    });
+  }
+
+  void _addScene() {
+    _saveSelectedSceneText();
+    if (sceneTitles.length >= 20) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A project can contain up to 20 scenes.')),
+      );
+      return;
+    }
+    setState(() {
+      sceneTitles.add('New historical scene');
+      selectedScene = sceneTitles.length - 1;
+      sceneTextController.text = sceneTitles[selectedScene];
+    });
+  }
+
+  void _moveSelectedScene(int direction) {
+    _saveSelectedSceneText();
+    final destination = selectedScene + direction;
+    if (destination < 0 || destination >= sceneTitles.length) return;
+    setState(() {
+      final item = sceneTitles.removeAt(selectedScene);
+      sceneTitles.insert(destination, item);
+      selectedScene = destination;
+      sceneTextController.text = sceneTitles[selectedScene];
+    });
+  }
+
+  List<String> _currentSceneTitles() {
+    _saveSelectedSceneText();
+    return sceneTitles
+        .map((scene) => scene.trim())
+        .where((scene) => scene.isNotEmpty)
+        .toList();
   }
 
   @override
@@ -1698,12 +1764,8 @@ class _EditorScreenState extends State<EditorScreen> {
             onGenerate: () => renderAndShareVideo(
               context,
               title: widget.projectTitle,
-              sceneTitles: buildSceneTitles(
-                widget.projectInput.isNotEmpty
-                    ? widget.projectInput
-                    : widget.projectTitle,
-                sceneCount,
-              ),
+              sceneTitles: _currentSceneTitles(),
+              style: style,
               duration: widget.duration,
               description: descriptionController.text,
               voice: voice,
@@ -1722,7 +1784,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               IconButton(
                 tooltip: 'Add scene',
-                onPressed: () => setState(() => sceneCount++),
+                onPressed: _addScene,
                 icon: const Icon(Icons.add_circle_outline, color: gold),
               ),
             ],
@@ -1732,12 +1794,12 @@ class _EditorScreenState extends State<EditorScreen> {
             height: 85,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: sceneCount,
+              itemCount: sceneTitles.length,
               separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, index) {
                 final selected = index == selectedScene;
                 return InkWell(
-                  onTap: () => setState(() => selectedScene = index),
+                  onTap: () => _selectScene(index),
                   borderRadius: BorderRadius.circular(14),
                   child: Container(
                     width: 90,
@@ -1814,12 +1876,8 @@ class _EditorScreenState extends State<EditorScreen> {
               context,
               title: widget.projectTitle,
               voice: voice,
-              sceneTitles: buildSceneTitles(
-                widget.projectInput.isNotEmpty
-                    ? widget.projectInput
-                    : widget.projectTitle,
-                sceneCount,
-              ),
+              sceneTitles: _currentSceneTitles(),
+              style: style,
               duration: widget.duration,
               description: descriptionController.text.trim(),
             ),
@@ -1896,18 +1954,65 @@ class _EditorScreenState extends State<EditorScreen> {
           ],
         );
       case 'Scenes':
-        return Text(
-          'Scene ${selectedScene + 1} selected. '
-          'You can add scenes and select them in the timeline. '
-          'Actual scene replacement and reordering will be connected '
-          'to the video-rendering engine in a later step.',
-          style: const TextStyle(color: muted, height: 1.6),
-        );
       case 'Script':
-        return const Text(
-          'Script editing will be connected to the project script '
-          'and narration timeline.',
-          style: TextStyle(color: muted, height: 1.6),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              activeTool == 'Scenes'
+                  ? 'Edit scene ${selectedScene + 1}'
+                  : 'Edit narration for this scene',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: sceneTextController,
+              minLines: 4,
+              maxLines: 10,
+              maxLength: 3500,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                hintText: activeTool == 'Scenes'
+                    ? 'Describe this scene...'
+                    : 'Write the narration for this scene...',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onChanged: (_) => _saveSelectedSceneText(),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: selectedScene > 0
+                        ? () => _moveSelectedScene(-1)
+                        : null,
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Move earlier'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: selectedScene < sceneTitles.length - 1
+                        ? () => _moveSelectedScene(1)
+                        : null,
+                    icon: const Icon(Icons.arrow_forward),
+                    label: const Text('Move later'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Edited scene text is used for narration and displayed in the '
+              'current illustrated renderer.',
+              style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+            ),
+          ],
         );
       case 'Subtitles':
         return const Text(
